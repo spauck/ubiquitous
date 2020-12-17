@@ -1,11 +1,14 @@
 package com.github.spauck.ubiquitous
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import java.net.URLDecoder
 import java.util.*
 
 class InMemoryHttpJson : HttpJson
 {
-  private val store = mutableMapOf<String, Any?>()
+  private val objectMapper = ObjectMapper()
+
+  private var store: Any? = null
 
   override fun process(method: String, path: String, json: String): HttpResult
   {
@@ -24,76 +27,206 @@ class InMemoryHttpJson : HttpJson
 
   private fun get(path: String): HttpResult
   {
-    return HttpResult(
-      200,
-      ObjectMapper().writeValueAsString(getNested(store, split(path))),
-    )
-  }
-
-  private fun getNested(
-    map: Any?,
-    path: Deque<String>): Any?
-  {
-    if (path.size == 0)
+    val (found, value) = getNested(store, split(path))
+    return if (found)
     {
-      return map
+      HttpResult(
+        200,
+        objectMapper.writeValueAsString(value),
+      )
     }
     else
     {
-      if (map !is Map<*, *>)
+      HttpResult(
+        404,
+        "Not Found",
+      )
+    }
+  }
+
+  private fun getNested(
+    jsonStructure: Any?,
+    path: Deque<StructureKey>): (GetResult)
+  {
+    if (path.size == 0)
+    {
+      return GetResult(true, jsonStructure)
+    }
+    else
+    {
+      val key = path.removeFirst()
+      if (jsonStructure is Map<*, *> && key is ObjectKey)
       {
-        // Should send 404 or something, depending on type
-        throw IllegalAccessError()
+        val map = jsonStructure as MutableMap<String, Any?>
+        return getNested(map[key.field], path)
+      }
+      else if (jsonStructure is List<*> && key is ArrayKey)
+      {
+        return if (jsonStructure.size <= key.index + 1)
+        {
+          getNested(jsonStructure[key.index], path)
+        }
+        else
+        {
+          GetResult(false, null)
+        }
       }
       else
       {
-        val first = path.removeFirst()
-        return getNested(map[first], path)
+        return GetResult(false, null)
       }
     }
   }
 
   private fun put(path: String, json: String): HttpResult
   {
-    val data = ObjectMapper().readValue(json, Any::class.java)
-    putNested(store, split(path), data)
-    return HttpResult(200, "")
+    val data = objectMapper.readValue(json, Any::class.java)
+    return if (putNested({ store }, ::setStore, split(path), data))
+    {
+      HttpResult(200, "")
+    }
+    else
+    {
+      HttpResult(409, "Conflict")
+    }
   }
 
   private fun patch(path: String, json: String): HttpResult
   {
-    val data = ObjectMapper().readValue(json, LinkedHashMap::class.java)
-    putNested(store, split(path), data)
+    val data = objectMapper.readValue(json, Any::class.java)
+    putNested({ store }, ::setStore, split(path), data)
     return HttpResult(200, "")
   }
 
-  private fun split(path: String) = ArrayDeque(path.split('/').filter { it.isNotEmpty() })
+  private fun setStore(v: Any?)
+  {
+    store = v
+  }
+
+  @Throws(NumberFormatException::class)
+  private fun split(path: String) = ArrayDeque(path.split('/')
+    .filter { it.isNotEmpty() }
+    .flatMap {
+      it
+        .split(':')
+        .mapIndexed { i, v ->
+          if (i == 0)
+          {
+            ObjectKey(URLDecoder.decode(v, "UTF-8"))
+          }
+          else
+          {
+            ArrayKey(v.toInt())
+          }
+        }
+    })
 
   private fun putNested(
-    map: MutableMap<String, Any?>,
-    path: Deque<String>,
-    json: Any?)
+    getter: () -> Any?,
+    setter: (Any?) -> Unit,
+    path: Deque<StructureKey>,
+    json: Any?): Boolean
   {
-    if (path.size == 1)
+    if (path.size == 0)
     {
-      map[path.first] = json
+      setter(json)
+      return true
     }
     else
     {
-      val first = path.removeFirst()
-      var nested = map[first]
-      if (nested !is Map<*, *>)
+      val key = path.removeFirst()
+      when (key)
       {
-        nested = mutableMapOf<String, Any?>()
-        map[first] = nested
-      }
+        is ObjectKey ->
+        {
+          val field: String = key.field
+          val jsonStructure = getAndSetIfNull(
+            getter,
+            setter,
+            { mutableMapOf<String, Any?>() })
+          return when (jsonStructure)
+          {
+            is MutableMap<*, *> ->
+            {
+              val map = jsonStructure as MutableMap<String, Any?>
+              putNested(
+                { map[field] },
+                { v -> map[field] = v },
+                path,
+                json,
+              )
+            }
+            else -> false
+          }
+        }
+        is ArrayKey ->
+        {
+          val index: Int = key.index
+          val jsonStructure = getAndSetIfNull(
+            getter,
+            setter,
+            { mutableListOf<Any?>() })
+          when (jsonStructure)
+          {
+            is MutableList<*> ->
+            {
+              val list = jsonStructure as MutableList<Any?>
 
-      @Suppress("UNCHECKED_CAST")
-      putNested(
-        nested as MutableMap<String, Any?>,
-        path,
-        json
-      )
+              return when
+              {
+                index > list.size ->
+                {
+                  false
+                }
+                index == list.size ->
+                {
+                  putNested(
+                    { list.getOrNull(index) },
+                    { v -> list.add(index, v) },
+                    path,
+                    json,
+                  )
+                }
+                else ->
+                {
+                  putNested(
+                    { list[index] },
+                    { v -> list[index] = v },
+                    path,
+                    json,
+                  )
+                }
+              }
+            }
+            else -> return false
+          }
+        }
+      }
     }
   }
+
+  private inline fun getAndSetIfNull(
+    getter: () -> Any?,
+    setter: (Any?) -> Unit,
+    ifNull: () -> Any?,
+  ): Any?
+  {
+    var value = getter()
+    if (value == null)
+    {
+      value = ifNull()
+      setter(value)
+    }
+    return value
+  }
 }
+
+data class GetResult(
+  val found: Boolean,
+  val value: Any?,
+)
+
+sealed class StructureKey
+
+data class ObjectKey(val field: String) : StructureKey()
+data class ArrayKey(val index: Int) : StructureKey()
