@@ -142,4 +142,72 @@ class InMemoryHttpJsonTest
       """
     )
   }
+
+  @Test
+  fun `can PATCH an object onto existing data that doesn't clash`()
+  {
+    httpJson.process("PUT", "/nested/path/", """{"field": "value"}""")
+    httpJson.process("PATCH", "nested/", """{"field2": "value2"}""")
+
+    val result = httpJson.process("GET", "/", "")
+
+    JsonAssertions.assertThatJson(result.body).isEqualTo(
+      """
+        {
+          "nested":
+          {
+            "path":
+            {
+              "field": "value"
+            }
+            "field2": "value2"
+          }
+        }
+      """
+    )
+  }
+
+  @Test
+  fun `can PATCH an object into existing data that doesn't clash`()
+  {
+    httpJson.process("PUT", "/nested/path/", """{"field": "value"}""")
+    httpJson.process("PATCH", "nested/", """{"path": {"field2": "value2"}}""")
+
+    val result = httpJson.process("GET", "/", "")
+
+    JsonAssertions.assertThatJson(result.body).isEqualTo(
+      """
+        {
+          "nested":
+          {
+            "path":
+            {
+              "field": "value",
+              "field2": "value2"
+            }
+          }
+        }
+      """
+    )
+  }
+
+  @Test
+  fun `can PATCH an object over existing data that does clash`()
+  {
+    httpJson.process("PUT", "/nested/path/", """{"field": "value"}""")
+    httpJson.process("PATCH", "nested/", """{"path": "value2"}""")
+
+    val result = httpJson.process("GET", "/", "")
+
+    JsonAssertions.assertThatJson(result.body).isEqualTo(
+      """
+        {
+          "nested":
+          {
+            "path": "value2"
+          }
+        }
+      """
+    )
+  }
 }

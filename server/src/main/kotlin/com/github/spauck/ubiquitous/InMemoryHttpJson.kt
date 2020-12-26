@@ -2,7 +2,6 @@ package com.github.spauck.ubiquitous
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import java.net.URLDecoder
-import java.util.*
 
 class InMemoryHttpJson : HttpJson
 {
@@ -81,7 +80,7 @@ class InMemoryHttpJson : HttpJson
   private fun put(path: String, json: String): HttpResult
   {
     val data = objectMapper.readValue(json, Any::class.java)
-    return if (putNested({ store }, ::setStore, split(path), data))
+    return if (putNested(ArbitraryAccessor({ store }, ::setStore), split(path), data))
     {
       HttpResult(200, "")
     }
@@ -94,8 +93,14 @@ class InMemoryHttpJson : HttpJson
   private fun patch(path: String, json: String): HttpResult
   {
     val data = objectMapper.readValue(json, Any::class.java)
-    putNested({ store }, ::setStore, split(path), data)
-    return HttpResult(200, "")
+    return if (patchNested(ArbitraryAccessor({ store }, ::setStore), split(path), data))
+    {
+      HttpResult(200, "")
+    }
+    else
+    {
+      HttpResult(409, "Conflict")
+    }
   }
 
   private fun setStore(v: Any?)
@@ -122,14 +127,13 @@ class InMemoryHttpJson : HttpJson
     })
 
   private fun putNested(
-    getter: () -> Any?,
-    setter: (Any?) -> Unit,
+    accessor: Accessor,
     path: Deque<StructureKey>,
     json: Any?): Boolean
   {
     if (path.size == 0)
     {
-      setter(json)
+      accessor.set(json)
       return true
     }
     else
@@ -140,18 +144,14 @@ class InMemoryHttpJson : HttpJson
         is ObjectKey ->
         {
           val field: String = key.field
-          val jsonStructure = getAndSetIfNull(
-            getter,
-            setter,
-            { mutableMapOf<String, Any?>() })
+          val jsonStructure = getAndSetIfNull(accessor) { mutableMapOf<String, Any?>() }
           return when (jsonStructure)
           {
             is MutableMap<*, *> ->
             {
               val map = jsonStructure as MutableMap<String, Any?>
               putNested(
-                { map[field] },
-                { v -> map[field] = v },
+                MapAccessor(map, field),
                 path,
                 json,
               )
@@ -162,10 +162,7 @@ class InMemoryHttpJson : HttpJson
         is ArrayKey ->
         {
           val index: Int = key.index
-          val jsonStructure = getAndSetIfNull(
-            getter,
-            setter,
-            { mutableListOf<Any?>() })
+          val jsonStructure = getAndSetIfNull(accessor) { mutableListOf<Any?>() }
           when (jsonStructure)
           {
             is MutableList<*> ->
@@ -178,20 +175,76 @@ class InMemoryHttpJson : HttpJson
                 {
                   false
                 }
-                index == list.size ->
+                else ->
                 {
                   putNested(
-                    { list.getOrNull(index) },
-                    { v -> list.add(index, v) },
+                    ListAccessor(list, index),
                     path,
                     json,
                   )
                 }
+              }
+            }
+            else -> return false
+          }
+        }
+      }
+    }
+  }
+
+  private fun patchNested(
+    accessor: Accessor,
+    path: Deque<StructureKey>,
+    json: Any?): Boolean
+  {
+    if (path.size == 0)
+    {
+      accessor.set(json)
+      return true
+    }
+    else
+    {
+      val key = path.removeFirst()
+      when (key)
+      {
+        is ObjectKey ->
+        {
+          val field: String = key.field
+          val jsonStructure = getAndSetIfNull(accessor) { mutableMapOf<String, Any?>() }
+          return when (jsonStructure)
+          {
+            is MutableMap<*, *> ->
+            {
+              val map = jsonStructure as MutableMap<String, Any?>
+              putNested(
+                MapAccessor(map, field),
+                path,
+                json,
+              )
+            }
+            else -> false
+          }
+        }
+        is ArrayKey ->
+        {
+          val index: Int = key.index
+          val jsonStructure = getAndSetIfNull(accessor) { mutableListOf<Any?>() }
+          when (jsonStructure)
+          {
+            is MutableList<*> ->
+            {
+              val list = jsonStructure as MutableList<Any?>
+
+              return when
+              {
+                index > list.size ->
+                {
+                  false
+                }
                 else ->
                 {
                   putNested(
-                    { list[index] },
-                    { v -> list[index] = v },
+                    ListAccessor(list, index),
                     path,
                     json,
                   )
@@ -206,16 +259,15 @@ class InMemoryHttpJson : HttpJson
   }
 
   private inline fun getAndSetIfNull(
-    getter: () -> Any?,
-    setter: (Any?) -> Unit,
-    ifNull: () -> Any?,
-  ): Any?
+    accessor: Accessor,
+    ifNull: () -> Any,
+  ): Any
   {
-    var value = getter()
+    var value = accessor.get()
     if (value == null)
     {
       value = ifNull()
-      setter(value)
+      accessor.set(value)
     }
     return value
   }
@@ -230,3 +282,53 @@ sealed class StructureKey
 
 data class ObjectKey(val field: String) : StructureKey()
 data class ArrayKey(val index: Int) : StructureKey()
+
+interface Accessor
+{
+  fun get(): Any?
+  fun set(value: Any?)
+}
+
+class ArbitraryAccessor(
+  private val getter: () -> Any?,
+  private val setter: (Any?) -> Unit,
+) : Accessor
+{
+  override fun get() = getter()
+
+  override fun set(value: Any?)
+  {
+    setter(value)
+  }
+}
+
+class MapAccessor<T>(
+  private val map: MutableMap<T, Any?>,
+  private val key: T,
+) : Accessor
+{
+  override fun get() = map[key]
+
+  override fun set(value: Any?)
+  {
+    map[key] = value
+  }
+}
+
+class ListAccessor(
+  private val list: MutableList<Any?>,
+  private val index: Int,
+) : Accessor
+{
+  override fun get() = list.getOrNull(index)
+
+  override fun set(value: Any?)
+  {
+    when
+    {
+      index == list.size -> list.add(index, value)
+      index < list.size -> list[index] = value
+      else -> throw IndexOutOfBoundsException()
+    }
+  }
+}
