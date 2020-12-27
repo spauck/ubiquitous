@@ -33,8 +33,17 @@ internal class Server(private val httpJson: HttpJson)
       {
         checkNotNull(exchange)
 
+        var method = exchange.requestMethod
+        if (method == "POST")
+        {
+          method = exchange
+            .requestHeaders["X-HTTP-Method-Override"]
+            ?.firstOrNull { it.isNotBlank() }
+            ?: method
+        }
+
         val result = httpJson.process(
-          exchange.requestMethod,
+          method,
           exchange.requestURI.toString(),
           exchange.requestBody.readBytes().decodeToString()
         )
