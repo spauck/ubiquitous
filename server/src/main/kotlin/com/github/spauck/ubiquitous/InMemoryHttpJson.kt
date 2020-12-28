@@ -231,6 +231,25 @@ class InMemoryHttpJson : HttpJson
             }
             results
           }
+          is List<*> ->
+          {
+            val results = mutableListOf<PatchApplication>()
+            for ((index, value) in json.withIndex())
+            {
+              val list = stored as MutableList<Any?>
+              val newAcc = ListAccessor(list, index)
+              val patchApplications = patchNested(newAcc, value)
+              if (patchApplications != null)
+              {
+                results.addAll(patchApplications)
+              }
+              else
+              {
+                return null
+              }
+            }
+            results
+          }
           else ->
           {
             listOf(PatchApplication(accessor, json))

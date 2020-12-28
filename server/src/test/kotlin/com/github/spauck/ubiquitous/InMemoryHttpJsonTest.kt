@@ -278,4 +278,59 @@ class InMemoryHttpJsonTest
     val getResult = httpJson.process("GET", "/", "")
     JsonAssertions.assertThatJson(getResult.body).isEqualTo(intialJson)
   }
+
+  @Test
+  fun `array PATCH updates by element`()
+  {
+    httpJson.process("PUT", "/", """["one", "two"]""")
+
+    httpJson.process("PATCH", "/", """["three", "four"]""")
+
+    val getResult = httpJson.process("GET", "/", "")
+    JsonAssertions.assertThatJson(getResult.body).isEqualTo("""["three", "four"]""")
+  }
+
+  @Test
+  fun `array PATCH can over-run`()
+  {
+    httpJson.process("PUT", "/", """["one", "two"]""")
+
+    httpJson.process("PATCH", "/", """["three", "four", "five"]""")
+
+    val getResult = httpJson.process("GET", "/", "")
+    JsonAssertions.assertThatJson(getResult.body).isEqualTo("""["three", "four", "five"]""")
+  }
+
+  @Test
+  fun `array PATCH can under-run`()
+  {
+    httpJson.process("PUT", "/", """["one", "two"]""")
+
+    httpJson.process("PATCH", "/", """["three"]""")
+
+    val getResult = httpJson.process("GET", "/", "")
+    JsonAssertions.assertThatJson(getResult.body).isEqualTo("""["three", "two"]""")
+  }
+
+  @Test
+  fun `array PATCH preserves nulls`()
+  {
+    httpJson.process("PUT", "/", """["one", "two"]""")
+
+    httpJson.process("PATCH", "/", """[null, null]""")
+
+    val getResult = httpJson.process("GET", "/", "")
+    JsonAssertions.assertThatJson(getResult.body).isEqualTo("""[null, null]""")
+  }
+
+  @Test
+  fun `array PATCH applies object patches`()
+  {
+    httpJson.process("PUT", "/", """[{"field": "value"}, {}]""")
+
+    httpJson.process("PATCH", "/", """[{}, {"field2": "value2"}]""")
+
+    val getResult = httpJson.process("GET", "/", "")
+    JsonAssertions.assertThatJson(getResult.body).isEqualTo("""[{"field": "value"}, {"field2": "value2"}]""")
+  }
 }
