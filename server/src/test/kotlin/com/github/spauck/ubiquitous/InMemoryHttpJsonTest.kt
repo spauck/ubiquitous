@@ -144,7 +144,17 @@ class InMemoryHttpJsonTest
   }
 
   @Test
-  fun `can PATCH an object onto existing data that doesn't clash`()
+  fun `can PATCH at root level`()
+  {
+    httpJson.process("PATCH", "/", """{"field": "value"}""")
+
+    val result = httpJson.process("GET", "/", "")
+
+    JsonAssertions.assertThatJson(result.body).isEqualTo("""{"field": "value"}""")
+  }
+
+  @Test
+  fun `can PATCH an object to add a field`()
   {
     httpJson.process("PUT", "/nested/path/", """{"field": "value"}""")
     httpJson.process("PATCH", "nested/", """{"field2": "value2"}""")
@@ -159,7 +169,7 @@ class InMemoryHttpJsonTest
             "path":
             {
               "field": "value"
-            }
+            },
             "field2": "value2"
           }
         }
@@ -168,7 +178,27 @@ class InMemoryHttpJsonTest
   }
 
   @Test
-  fun `can PATCH an object into existing data that doesn't clash`()
+  fun `can PATCH an object to null a field`()
+  {
+    httpJson.process("PUT", "/nested/path/", """{"field": "value"}""")
+    httpJson.process("PATCH", "/", """{"nested": {"path": null}}""")
+
+    val result = httpJson.process("GET", "/", "")
+
+    JsonAssertions.assertThatJson(result.body).isEqualTo(
+      """
+        {
+          "nested":
+          {
+            "path": null
+          }
+        }
+      """
+    )
+  }
+
+  @Test
+  fun `can PATCH an object to add a nested field`()
   {
     httpJson.process("PUT", "/nested/path/", """{"field": "value"}""")
     httpJson.process("PATCH", "nested/", """{"path": {"field2": "value2"}}""")
@@ -192,22 +222,60 @@ class InMemoryHttpJsonTest
   }
 
   @Test
-  fun `can PATCH an object over existing data that does clash`()
+  fun `cannot PATCH an object field to a different type`()
   {
-    httpJson.process("PUT", "/nested/path/", """{"field": "value"}""")
-    httpJson.process("PATCH", "nested/", """{"path": "value2"}""")
+    httpJson.process("PUT", "/", """{"field": "string"}""")
 
-    val result = httpJson.process("GET", "/", "")
+    val patchResult = httpJson.process("PATCH", "/", """{"field": 123}""")
+    JsonAssertions.assertThatJson(patchResult.statusCode).isEqualTo(409)
+  }
 
-    JsonAssertions.assertThatJson(result.body).isEqualTo(
+  // The object layering helps to guarantee it isn't a false pass
+  // that might occur due to field ordering at a single layer.
+  @Test
+  fun `a failed PATCH should not modify the data`()
+  {
+    val intialJson = """
+        {
+          "layer1":
+          {
+            "field": "string",
+            "layer2":
+            {
+              "field": "string",
+              "layer3":
+              {
+                "field": "string"
+              }
+            }
+          }
+        }
+      """
+    httpJson.process("PUT", "/", intialJson)
+
+    val patchResult = httpJson.process(
+      "PATCH", "/",
       """
         {
-          "nested":
+          "layer1":
           {
-            "path": "value2"
+            "field": "NEW string",
+            "layer2":
+            {
+              "field": {"should": "fail"},
+              "layer3":
+              {
+                "field": "NEW string"
+              }
+            }
           }
         }
       """
     )
+    JsonAssertions.assertThatJson(patchResult.statusCode).isEqualTo(409)
+
+    // This is the assertion we care most about
+    val getResult = httpJson.process("GET", "/", "")
+    JsonAssertions.assertThatJson(getResult.body).isEqualTo(intialJson)
   }
 }

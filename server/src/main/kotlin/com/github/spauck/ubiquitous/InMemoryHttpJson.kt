@@ -26,7 +26,7 @@ class InMemoryHttpJson : HttpJson
 
   private fun get(path: String): HttpResult
   {
-    val (found, value) = getNested(store, split(path))
+    val (found, value) = getNested(store, split(path), 0)
     return if (found)
     {
       HttpResult(
@@ -45,25 +45,27 @@ class InMemoryHttpJson : HttpJson
 
   private fun getNested(
     jsonStructure: Any?,
-    path: Deque<StructureKey>): (GetResult)
+    path: List<StructureKey>,
+    index: Int,
+  ): GetResult
   {
-    if (path.size == 0)
+    if (path.size == index)
     {
       return GetResult(true, jsonStructure)
     }
     else
     {
-      val key = path.removeFirst()
+      val key = path[index]
       if (jsonStructure is Map<*, *> && key is ObjectKey)
       {
         val map = jsonStructure as MutableMap<String, Any?>
-        return getNested(map[key.field], path)
+        return getNested(map[key.field], path, index + 1)
       }
       else if (jsonStructure is List<*> && key is ArrayKey)
       {
         return if (jsonStructure.size <= key.index + 1)
         {
-          getNested(jsonStructure[key.index], path)
+          getNested(jsonStructure[key.index], path, index + 1)
         }
         else
         {
@@ -80,9 +82,20 @@ class InMemoryHttpJson : HttpJson
   private fun put(path: String, json: String): HttpResult
   {
     val data = objectMapper.readValue(json, Any::class.java)
-    return if (putNested(ArbitraryAccessor({ store }, ::setStore), split(path), data))
+    val accessor = nestedAccessorIn(ArbitraryAccessor({ store }, ::setStore), split(path), 0)
+    return if (accessor != null)
     {
-      HttpResult(200, "")
+      val existing = accessor.get()
+      accessor.set(data)
+
+      if (existing == null)
+      {
+        HttpResult(201, "")
+      }
+      else
+      {
+        HttpResult(204, "")
+      }
     }
     else
     {
@@ -93,9 +106,17 @@ class InMemoryHttpJson : HttpJson
   private fun patch(path: String, json: String): HttpResult
   {
     val data = objectMapper.readValue(json, Any::class.java)
-    return if (patchNested(ArbitraryAccessor({ store }, ::setStore), split(path), data))
+    val accessor = nestedAccessorIn(ArbitraryAccessor({ store }, ::setStore), split(path), 0)
+    return if (accessor != null)
     {
-      HttpResult(200, "")
+      if (patchNested(accessor, data))
+      {
+        HttpResult(200, objectMapper.writeValueAsString(accessor.get()))
+      }
+      else
+      {
+        HttpResult(409, "Conflict")
+      }
     }
     else
     {
@@ -109,7 +130,7 @@ class InMemoryHttpJson : HttpJson
   }
 
   @Throws(NumberFormatException::class)
-  private fun split(path: String) = ArrayDeque(path.split('/')
+  private fun split(path: String) = path.split('/')
     .filter { it.isNotEmpty() }
     .flatMap {
       it
@@ -124,68 +145,52 @@ class InMemoryHttpJson : HttpJson
             ArrayKey(v.toInt())
           }
         }
-    })
+    }
 
-  private fun putNested(
+  private fun nestedAccessorIn(
     accessor: Accessor,
-    path: Deque<StructureKey>,
-    json: Any?): Boolean
+    path: List<StructureKey>,
+    pathIndex: Int,
+  ): Accessor?
   {
-    if (path.size == 0)
+    if (path.size == pathIndex)
     {
-      accessor.set(json)
-      return true
+      return accessor
     }
     else
     {
-      val key = path.removeFirst()
-      when (key)
+      when (val key = path[pathIndex])
       {
         is ObjectKey ->
         {
           val field: String = key.field
-          val jsonStructure = getAndSetIfNull(accessor) { mutableMapOf<String, Any?>() }
+          val jsonStructure = accessor.getAndSetIfNull { mutableMapOf<String, Any?>() }
           return when (jsonStructure)
           {
             is MutableMap<*, *> ->
             {
               val map = jsonStructure as MutableMap<String, Any?>
-              putNested(
-                MapAccessor(map, field),
-                path,
-                json,
-              )
+              nestedAccessorIn(MapAccessor(map, field), path, pathIndex + 1)
             }
-            else -> false
+            else -> null
           }
         }
         is ArrayKey ->
         {
-          val index: Int = key.index
-          val jsonStructure = getAndSetIfNull(accessor) { mutableListOf<Any?>() }
-          when (jsonStructure)
+          val jsonStructure = accessor.getAndSetIfNull { mutableListOf<String>() }
+          return when (jsonStructure)
           {
             is MutableList<*> ->
             {
               val list = jsonStructure as MutableList<Any?>
 
-              return when
+              when
               {
-                index > list.size ->
-                {
-                  false
-                }
-                else ->
-                {
-                  putNested(
-                    ListAccessor(list, index),
-                    path,
-                    json,
-                  )
-                }
+                key.index > list.size -> null
+                else -> nestedAccessorIn(ListAccessor(list, key.index), path, pathIndex + 1)
               }
             }
-            else -> return false
+            else -> null
           }
         }
       }
@@ -194,87 +199,51 @@ class InMemoryHttpJson : HttpJson
 
   private fun patchNested(
     accessor: Accessor,
-    path: Deque<StructureKey>,
-    json: Any?): Boolean
+    json: Any?,
+  ): Boolean
   {
-    if (path.size == 0)
+    val stored = accessor.get()
+    return when
     {
-      accessor.set(json)
-      return true
-    }
-    else
-    {
-      val key = path.removeFirst()
-      when (key)
+      stored == null || json == null ->
       {
-        is ObjectKey ->
+        accessor.set(json)
+        true
+      }
+      stored::class == json::class ->
+      {
+        return when (json)
         {
-          val field: String = key.field
-          val jsonStructure = getAndSetIfNull(accessor) { mutableMapOf<String, Any?>() }
-          return when (jsonStructure)
+          is Map<*, *> ->
           {
-            is MutableMap<*, *> ->
+            for ((key, value) in json)
             {
-              val map = jsonStructure as MutableMap<String, Any?>
-              putNested(
-                MapAccessor(map, field),
-                path,
-                json,
-              )
+              val map = stored as MutableMap<String, Any?>
+              val newAcc = MapAccessor(map, key as String)
+              if (!patchNested(newAcc, value)) return false
             }
-            else -> false
+            true
           }
-        }
-        is ArrayKey ->
-        {
-          val index: Int = key.index
-          val jsonStructure = getAndSetIfNull(accessor) { mutableListOf<Any?>() }
-          when (jsonStructure)
+          else ->
           {
-            is MutableList<*> ->
-            {
-              val list = jsonStructure as MutableList<Any?>
-
-              return when
-              {
-                index > list.size ->
-                {
-                  false
-                }
-                else ->
-                {
-                  putNested(
-                    ListAccessor(list, index),
-                    path,
-                    json,
-                  )
-                }
-              }
-            }
-            else -> return false
+            accessor.set(json)
+            true
           }
         }
       }
+      else -> false
     }
   }
 
-  private inline fun getAndSetIfNull(
-    accessor: Accessor,
-    ifNull: () -> Any,
-  ): Any
-  {
-    var value = accessor.get()
-    if (value == null)
-    {
-      value = ifNull()
-      accessor.set(value)
-    }
-    return value
-  }
 }
 
 data class GetResult(
   val found: Boolean,
+  val value: Any?,
+)
+
+data class PatchResult(
+  val couldPatch: Boolean,
   val value: Any?,
 )
 
@@ -302,9 +271,9 @@ class ArbitraryAccessor(
   }
 }
 
-class MapAccessor<T>(
-  private val map: MutableMap<T, Any?>,
-  private val key: T,
+class MapAccessor(
+  private val map: MutableMap<String, Any?>,
+  private val key: String,
 ) : Accessor
 {
   override fun get() = map[key]
@@ -331,4 +300,17 @@ class ListAccessor(
       else -> throw IndexOutOfBoundsException()
     }
   }
+}
+
+private inline fun Accessor.getAndSetIfNull(
+  ifNull: () -> Any,
+): Any
+{
+  var value = this.get()
+  if (value == null)
+  {
+    value = ifNull()
+    this.set(value)
+  }
+  return value
 }
