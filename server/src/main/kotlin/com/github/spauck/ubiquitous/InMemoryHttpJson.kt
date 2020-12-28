@@ -109,8 +109,10 @@ class InMemoryHttpJson : HttpJson
     val accessor = nestedAccessorIn(ArbitraryAccessor({ store }, ::setStore), split(path), 0)
     return if (accessor != null)
     {
-      if (patchNested(accessor, data))
+      val patchApplications = patchNested(accessor, data)
+      if (patchApplications != null)
       {
+        patchApplications.forEach { it.apply() }
         HttpResult(200, objectMapper.writeValueAsString(accessor.get()))
       }
       else
@@ -200,41 +202,44 @@ class InMemoryHttpJson : HttpJson
   private fun patchNested(
     accessor: Accessor,
     json: Any?,
-  ): Boolean
+  ): List<PatchApplication>?
   {
     val stored = accessor.get()
     return when
     {
-      stored == null || json == null ->
-      {
-        accessor.set(json)
-        true
-      }
+      stored == null || json == null -> listOf(PatchApplication(accessor, json))
       stored::class == json::class ->
       {
         return when (json)
         {
           is Map<*, *> ->
           {
+            val results = mutableListOf<PatchApplication>()
             for ((key, value) in json)
             {
               val map = stored as MutableMap<String, Any?>
               val newAcc = MapAccessor(map, key as String)
-              if (!patchNested(newAcc, value)) return false
+              val patchApplications = patchNested(newAcc, value)
+              if (patchApplications != null)
+              {
+                results.addAll(patchApplications)
+              }
+              else
+              {
+                return null
+              }
             }
-            true
+            results
           }
           else ->
           {
-            accessor.set(json)
-            true
+            listOf(PatchApplication(accessor, json))
           }
         }
       }
-      else -> false
+      else -> null
     }
   }
-
 }
 
 data class GetResult(
@@ -242,10 +247,16 @@ data class GetResult(
   val value: Any?,
 )
 
-data class PatchResult(
-  val couldPatch: Boolean,
-  val value: Any?,
+data class PatchApplication(
+  private val accessor: Accessor,
+  private val setValue: Any?
 )
+{
+  fun apply()
+  {
+    accessor.set(setValue)
+  }
+}
 
 sealed class StructureKey
 
