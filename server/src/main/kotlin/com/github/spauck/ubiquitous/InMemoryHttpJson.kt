@@ -16,6 +16,7 @@ class InMemoryHttpJson : HttpJson
       SupportedMethods.GET -> get(path)
       SupportedMethods.PUT -> put(path, json)
       SupportedMethods.PATCH -> patch(path, json)
+      SupportedMethods.POST -> post(path, json)
       null -> HttpResult(
         405,
         "Method Not Allowed",
@@ -114,6 +115,30 @@ class InMemoryHttpJson : HttpJson
       {
         patchApplications.forEach { it.apply() }
         HttpResult(200, objectMapper.writeValueAsString(accessor.get()))
+      }
+      else
+      {
+        HttpResult(409, "Conflict")
+      }
+    }
+    else
+    {
+      HttpResult(409, "Conflict")
+    }
+  }
+
+  private fun post(path: String, json: String): HttpResult
+  {
+    val accessor = nestedAccessorIn(ArbitraryAccessor({ store }, ::setStore), split(path), 0)
+    return if (accessor != null)
+    {
+      val shouldBeList = accessor.getAndSetIfNull { mutableListOf<Any?>() }
+      if (shouldBeList is MutableList<*>)
+      {
+        val list = shouldBeList as MutableList<Any?>
+        val data = objectMapper.readValue(json, Any::class.java)
+        list.add(data)
+        HttpResult(201, "")
       }
       else
       {

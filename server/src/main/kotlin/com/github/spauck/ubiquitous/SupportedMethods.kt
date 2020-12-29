@@ -5,6 +5,7 @@ enum class SupportedMethods
   GET,
   PATCH,
   PUT,
+  POST,
   ;
 }
 

@@ -334,6 +334,37 @@ class InMemoryHttpJsonTest
     JsonAssertions.assertThatJson(getResult.body).isEqualTo("""[{"field": "value"}, {"field2": "value2"}]""")
   }
 
+  @Test
+  fun `POST initialises a path as an array`()
+  {
+    httpJson.process("POST", "/path", """"value"""")
+
+    val getResult = httpJson.process("GET", "/", "")
+    JsonAssertions.assertThatJson(getResult.body).isEqualTo("""{"path": ["value"]}""")
+  }
+
+  @Test
+  fun `POST adds to an array on a path`()
+  {
+    httpJson.process("PUT", "/", """{"path": ["value"]}""")
+    httpJson.process("POST", "/path", """"another value"""")
+
+    val getResult = httpJson.process("GET", "/", "")
+    JsonAssertions.assertThatJson(getResult.body).isEqualTo("""{"path": ["value", "another value"]}""")
+  }
+
+  @Test
+  fun `cannot POST to an existing path that is not an array`()
+  {
+    httpJson.process("PUT", "/", """{"path": "value"}""")
+
+    val postResult = httpJson.process("POST", "/path", """"another value"""")
+
+    JsonAssertions.assertThatJson(postResult.statusCode).isEqualTo(409)
+    val getResult = httpJson.process("GET", "/", "")
+    JsonAssertions.assertThatJson(getResult.body).isEqualTo("""{"path": "value"}""")
+  }
+
   /* Outstanding features:
       - Remove on PATCH to null
       - Treat all JSON number types as one for PATCH behaviour
