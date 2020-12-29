@@ -333,4 +333,10 @@ class InMemoryHttpJsonTest
     val getResult = httpJson.process("GET", "/", "")
     JsonAssertions.assertThatJson(getResult.body).isEqualTo("""[{"field": "value"}, {"field2": "value2"}]""")
   }
+
+  /* Outstanding features:
+      - Remove on PATCH to null
+      - Treat all JSON number types as one for PATCH behaviour
+      - DELETE
+   */
 }
