@@ -8,7 +8,7 @@ import java.util.stream.Collectors
 fun send(
   method: String,
   path: String,
-  requestBody: String,
+  requestBody: String?,
 ): String
 {
   val url = URL("http://localhost:9180$path")
@@ -16,11 +16,21 @@ fun send(
   var result: String
 
   with(url.openConnection() as HttpURLConnection) {
-    doOutput = true
     requestMethod = method
-    val writer = OutputStreamWriter(outputStream)
-    writer.write(requestBody)
-    writer.flush()
+
+    if (requestBody != null)
+    {
+      doOutput = true
+      val writer = OutputStreamWriter(outputStream)
+      writer.write(requestBody)
+      writer.flush()
+    }
+    else
+    {
+      // Calling .getResponseCode() triggers the call.
+      responseCode
+    }
+
     println("\nSent '$requestMethod' request to URL : $url; Response Code : $responseCode")
 
     if (responseCode >= 400)
