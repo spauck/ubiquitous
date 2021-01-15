@@ -2,6 +2,8 @@ import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 plugins {
   kotlin("jvm")
+  id("info.solidsoft.pitest") version "1.5.1"
+  jacoco
 }
 
 version = "0.1-SNAPSHOT"
@@ -31,4 +33,20 @@ tasks.withType<Test> {
   testLogging {
     events("passed", "skipped", "failed")
   }
+}
+
+tasks.jacocoTestReport {
+  dependsOn(tasks.test)
+  reports {
+    xml.isEnabled = false
+    csv.isEnabled = false
+    html.isEnabled = true
+  }
+}
+
+pitest {
+  junit5PluginVersion.set("0.12")
+  threads.set(4)
+  outputFormats.set(listOf("XML", "HTML"))
+  timestampedReports.set(false)
 }
