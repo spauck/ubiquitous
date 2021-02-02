@@ -4,6 +4,15 @@ plugins {
   kotlin("jvm")
   id("info.solidsoft.pitest") version "1.5.1"
   jacoco
+  id("org.sonarqube") version "3.0"
+}
+
+sonarqube {
+  properties {
+    property("sonar.projectKey", "spauck_ubiquitous")
+    property("sonar.organization", "spauck")
+    property("sonar.host.url", "https://sonarcloud.io")
+  }
 }
 
 version = "0.1-SNAPSHOT"
@@ -38,7 +47,7 @@ tasks.withType<Test> {
 tasks.jacocoTestReport {
   dependsOn(tasks.test)
   reports {
-    xml.isEnabled = false
+    xml.isEnabled = true
     csv.isEnabled = false
     html.isEnabled = true
   }
