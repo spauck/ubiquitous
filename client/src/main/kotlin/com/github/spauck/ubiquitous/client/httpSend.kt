@@ -11,7 +11,7 @@ fun send(
   requestBody: String?,
 ): String
 {
-  val url = URL("http://localhost:9180$path")
+  val url = URL(path)
 
   var result: String
 

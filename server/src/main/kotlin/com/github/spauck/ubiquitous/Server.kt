@@ -6,11 +6,11 @@ import com.sun.net.httpserver.HttpServer
 import java.net.InetSocketAddress
 import java.util.concurrent.Executors
 
-internal class Server(private val httpJson: HttpJson)
+class Server(private val httpJson: HttpJson)
 {
   private var httpServer: HttpServer? = null
 
-  internal fun host(port: Int): Server
+  fun host(port: Int): Server
   {
     val server = HttpServer.create(InetSocketAddress("0.0.0.0", port), 0)
     server.createContext("/", Handler(httpJson))
@@ -20,7 +20,7 @@ internal class Server(private val httpJson: HttpJson)
     return this
   }
 
-  internal fun shutdown()
+  fun shutdown()
   {
     httpServer?.stop(5)
   }
