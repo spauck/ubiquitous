@@ -1,2 +1,3 @@
+# For some reason the maven pleasings don't work with later versions?
 [please]
-version = 15.15.0
+version = 14.6.0
