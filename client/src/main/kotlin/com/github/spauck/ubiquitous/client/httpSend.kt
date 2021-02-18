@@ -7,17 +7,20 @@ import java.util.stream.Collectors
 
 fun send(
   method: String,
-  path: String,
-  requestBody: String?,
-): String
+  url: String,
+  requestBody: String? = null,
+  headers: Map<String, String> = mapOf(
+    "Content-Type" to "application/json",
+    "Accept" to "application/json"),
+): HttpResult
 {
-  val url = URL("http://localhost:9180$path")
 
-  var result: String
-
-  with(url.openConnection() as HttpURLConnection) {
+  var resultBody: String
+  lateinit var connection: HttpURLConnection
+  with(URL(url).openConnection() as HttpURLConnection) {
+    connection = this
     requestMethod = method
-
+    headers.forEach { (name, value) -> addRequestProperty(name, value) }
     if (requestBody != null)
     {
       doOutput = true
@@ -27,24 +30,20 @@ fun send(
     }
     else
     {
-      // Calling .getResponseCode() triggers the call.
+      // Calling .getResponseCode() triggers the call in the case without a request body.
       responseCode
     }
 
-    println("\nSent '$requestMethod' request to URL : $url; Response Code : $responseCode")
-
-    if (responseCode >= 400)
-    {
-      result = ""
-    }
-    else
-    {
-      inputStream.bufferedReader().use {
-        result = it.lines().collect(Collectors.joining())
-        println(result)
-      }
+    (errorStream ?: inputStream).bufferedReader().use {
+      resultBody = it.lines().collect(Collectors.joining())
     }
   }
 
-  return result
+  return HttpResult(connection.responseCode, resultBody, connection.headerFields)
 }
+
+data class HttpResult(
+  val status: Int,
+  val body: String,
+  val headers: Map<String, List<String>>,
+)
