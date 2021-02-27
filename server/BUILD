@@ -3,14 +3,9 @@ subinclude("//build_defs:kotlin")
 
 kotlin_library(
     name = "server",
-    srcs = [
-        "./src/main/kotlin/com/github/spauck/ubiquitous/HttpJson.kt",
-        "./src/main/kotlin/com/github/spauck/ubiquitous/HttpResult.kt",
-        "./src/main/kotlin/com/github/spauck/ubiquitous/InMemoryHttpJson.kt",
-        "./src/main/kotlin/com/github/spauck/ubiquitous/Main.kt",
-        "./src/main/kotlin/com/github/spauck/ubiquitous/Server.kt",
-        "./src/main/kotlin/com/github/spauck/ubiquitous/SupportedMethods.kt",
-        ],
+    srcs = glob([
+        "./src/main/kotlin/com/github/spauck/ubiquitous/*.kt",
+        ]),
     deps = [
         "//third_party:slf4j-simple",
         # "//third_party/kotlin-stdlib-jdk8",

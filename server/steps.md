@@ -3,7 +3,6 @@
 ```bash
 docker run -it --name try_please -v /$(pwd):/usr/src/server -w /usr/src/server golang:latest
 
-./pleasew
 apt-get update
 apt-get install tar
 apt-get install xz
