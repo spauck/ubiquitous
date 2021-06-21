@@ -22,6 +22,7 @@ dependencies {
   implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk8")
   implementation("com.fasterxml.jackson.core:jackson-databind:2.9.8")
 
+  testImplementation(project(":client"))
   val junitVersion = "5.7.0"
   testImplementation("org.junit.jupiter:junit-jupiter-api:$junitVersion")
   testImplementation("org.junit.jupiter:junit-jupiter-params:$junitVersion")
